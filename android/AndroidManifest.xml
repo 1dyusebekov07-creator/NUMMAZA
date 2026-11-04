@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="kz.nummaza.app">
+    <!-- Регистрация, вход и синхронизация через сервер NUMMAZA -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="NUMMAZA"
         android:icon="@mipmap/ic_launcher"

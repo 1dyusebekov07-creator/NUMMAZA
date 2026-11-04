@@ -1,0 +1,35 @@
+# NUMMAZA на своём сервере (VPS в Казахстане): сервер + PostgreSQL + Caddy (HTTPS от Let's Encrypt).
+# 1) Укажите домен и пароль базы в файле .env рядом с этим файлом:
+#      DOMAIN=nummaza.kz
+#      POSTGRES_PASSWORD=длинный-случайный-пароль
+# 2) docker compose up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nummaza
+      POSTGRES_USER: nummaza
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      DATABASE_URL: postgres://nummaza:${POSTGRES_PASSWORD}@db:5432/nummaza?sslmode=disable
+      PORT: "8080"
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?задайте DOMAIN в .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+volumes:
+  pgdata:
+  caddy_data:

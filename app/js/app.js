@@ -8,6 +8,10 @@
   const today = () => NZ.today();
 
   let S = NZ.load();
+  const SERVER = () => !!(NZ.api && NZ.api.enabled());
+  // На сервере аккаунт без токена = нужно войти заново
+  if (SERVER() && S.account && S.account.server && !NZ.api.hasSession()) S.session = false;
+  if (NZ.syncResetBase) NZ.syncResetBase(S);
   const ui = {
     route: 'home', sheet: null, sheetData: null, toast: null, showFormula: false, calYm: null, selDay: null,
     envFilter: 'all', authMode: null, pwShow: false, authErr: {}, importing: null, importResult: null, importErr: null,
@@ -114,7 +118,8 @@
     const mode = ui.authMode || (S.account ? 'in' : 'up');
     const e = ui.authErr;
     const err = (k) => (e[k] ? '<span class="err" id="err-' + k + '">' + esc(e[k]) + '</span>' : '');
-    const locked = S.auth.lockedUntil > Date.now();
+    const locked = !SERVER() && S.auth.lockedUntil > Date.now();
+    const busy = ui.authBusy;
     return '<div class="solo"><div class="solo-in">' +
       '<div class="row-between"><div class="brand-row">' + logo(32) + '<b>nummaza</b></div><div class="row-gap">' + langSwitch() + themeBtn() + '</div></div>' +
       '<div class="stack-6 mt-16"><h1 class="h1">' + esc(mode === 'in' ? t('auth.titleIn') : t('auth.titleUp')) + '</h1><p class="muted">' + esc(t('auth.tagline')) + '</p></div>' +
@@ -125,8 +130,8 @@
       '<div class="field"><div class="row-between"><label for="a-pw">' + esc(t('auth.password')) + '</label>' + (mode === 'in' ? '<button type="button" class="link" data-a="forgot">' + esc(t('auth.forgot')) + '</button>' : '') + '</div><div class="pw"><input id="a-pw" name="pw" type="' + (ui.pwShow ? 'text' : 'password') + '" autocomplete="' + (mode === 'in' ? 'current-password' : 'new-password') + '" placeholder="••••••••" aria-invalid="' + !!e.pw + '"><button type="button" class="icon-btn" data-a="pwToggle" aria-pressed="' + ui.pwShow + '" aria-label="' + esc(ui.pwShow ? t('auth.hide') : t('auth.show')) + '">' + icon('eye') + '</button></div>' + (mode === 'up' && !e.pw ? '<span class="hint">' + esc(t('auth.pwHint')) + '</span>' : '') + err('pw') + '</div>' +
       (mode === 'up' ? '<label class="check"><input type="checkbox" id="a-agree" name="agree"><span>' + esc(t('auth.agree')) + '</span></label>' + err('agree') : '') +
       (e.form ? '<p class="err-box" role="alert">' + esc(e.form) + '</p>' : '') +
-      '<button class="btn btn-primary btn-lg" type="submit" ' + (locked && mode === 'in' ? 'disabled' : '') + '>' + esc(mode === 'in' ? t('auth.ctaIn') : t('auth.ctaUp')) + '</button></form>' +
-      '<p class="note">' + icon('lock', 18) + '<span>' + esc(t('auth.note')) + '</span></p></div></div>';
+      '<button class="btn btn-primary btn-lg" type="submit" ' + ((locked && mode === 'in') || busy ? 'disabled' : '') + '>' + esc(busy ? (mode === 'in' ? t('auth.busyIn') : t('auth.busyUp')) : (mode === 'in' ? t('auth.ctaIn') : t('auth.ctaUp'))) + '</button></form>' +
+      '<p class="note">' + icon('lock', 18) + '<span>' + esc(SERVER() ? t('auth.noteServer') : t('auth.note')) + '</span></p></div></div>';
   }
   const normLogin = (s) => {
     const v = String(s || '').trim().toLowerCase();
@@ -136,6 +141,47 @@
     if (d.length === 10) d = '7' + d;
     return d.length === 11 && d[0] === '7' ? '+' + d : null;
   };
+  // Регистрация и вход через сервер (app/js/api.js). Данные затем синхронизируются (app/js/sync.js).
+  async function serverAuth(mode, name, login, pw) {
+    ui.authBusy = true; ui.authErr = {}; render();
+    let user;
+    try {
+      user = mode === 'up' ? await NZ.api.register(name, login, pw) : await NZ.api.login(login, pw);
+    } catch (err) {
+      ui.authBusy = false;
+      const c = err.code;
+      const f = (err.data && err.data.fields) || {};
+      if (c === 'validation') ui.authErr = { name: f.name ? t('auth.errName') : undefined, login: f.login ? t('auth.errLogin') : undefined, pw: f.password ? t('auth.errPw') : undefined };
+      else if (c === 'login_taken') ui.authErr = { form: t('auth.errTaken') };
+      else if (c === 'bad_credentials') ui.authErr = { form: err.data.attemptsLeft ? t('auth.errWrong', err.data.attemptsLeft) : t('auth.errBad') };
+      else if (c === 'locked') ui.authErr = { form: t('auth.errLocked', err.data.minutes || 15) };
+      else if (c === 'offline') ui.authErr = { form: t('auth.errOffline') };
+      else if (c === 'rate_limited') ui.authErr = { form: t('auth.errRate') };
+      else ui.authErr = { form: t('auth.errServer') };
+      render(); focusFirstError(); return;
+    }
+    // Другой человек на этом устройстве — начинаем с чистого состояния (язык и тема остаются)
+    const sameUser = !!(S.account && S.account.server && S.account.userId === user.id);
+    // Вход: данные берём с сервера. Регистрация: введённое на устройстве до неё сохраняем и отправляем.
+    const reset = mode === 'in' ? !sameUser : !!(S.account && S.account.server && !sameUser);
+    if (reset) {
+      const keep = { lang: S.profile.lang || NZ.lang, theme: S.profile.theme };
+      S = NZ.defaultState();
+      S.profile.lang = keep.lang; S.profile.theme = keep.theme;
+    }
+    if (!S.profile.lang) S.profile.lang = NZ.lang;
+    S.account = { name: user.name, login: user.login, userId: user.id, server: true };
+    S.session = true;
+    S.sync = S.sync && sameUser ? S.sync : { cursor: 0, outbox: [], lastAt: 0, error: null, clock: 0 };
+    if (mode === 'up') NZ.syncEnqueueAll(S); // профиль и всё введённое до регистрации — на сервер
+    else NZ.syncResetBase(S);
+    NZ.save(S);
+    ui.authErr = {}; ui.authName = ''; ui.authLogin = ''; ui.authBusy = false;
+    ui.route = 'home';
+    if (location.hash !== '#home') history.replaceState(null, '', '#home');
+    await NZ.sync.run(); // при входе забираем данные с сервера
+    render();
+  }
   async function submitAuth(form) {
     const mode = ui.authMode || (S.account ? 'in' : 'up');
     const name = form.name ? form.name.value.trim() : '';
@@ -148,9 +194,10 @@
       if (!login) e.login = t('auth.errLogin');
       if (pw.length < 8 || !/[a-zа-яәғқңөұүһі]/i.test(pw) || !/\d/.test(pw)) e.pw = t('auth.errPw');
       if (!form.agree.checked) e.agree = t('auth.errAgree');
-      if (!Object.keys(e).length && S.account) e.form = t('auth.errExists');
+      if (!SERVER() && !Object.keys(e).length && S.account) e.form = t('auth.errExists');
       ui.authErr = e;
       if (Object.keys(e).length) { render(); focusFirstError(); return; }
+      if (SERVER()) return serverAuth('up', name, login, pw);
       const salt = NZ.uid();
       S.account = { name, login, salt, hash: await NZ.hash(salt, pw), createdAt: today() };
       S.session = true;
@@ -158,6 +205,10 @@
       ui.authErr = {}; ui.authName = ''; ui.authLogin = '';
       commit();
       return;
+    }
+    if (SERVER()) {
+      if (!login) { ui.authErr = { login: t('auth.errLogin') }; render(); focusFirstError(); return; }
+      return serverAuth('in', '', login, pw);
     }
     if (S.auth.lockedUntil > Date.now()) { ui.authErr = { form: t('auth.errLocked', Math.ceil((S.auth.lockedUntil - Date.now()) / 60000)) }; render(); return; }
     if (!S.account) { ui.authErr = { form: t('auth.errNoAccount') }; render(); return; }
@@ -514,11 +565,22 @@
       '<section class="card row-gap"><span class="ava ava-lg" aria-hidden="true">' + esc(a.name[0].toUpperCase()) + '</span><div class="grow"><b>' + esc(a.name) + '</b><span class="small muted block">' + esc(masked) + '</span></div></section>' +
       '<section class="card stack-14"><h2 class="cap small muted">' + esc(t('prof.appearance')) + '</h2><div class="field"><span>' + esc(t('c.lang')) + '</span>' + langSwitch().replace('seg-sm', 'seg-full') + '</div><div class="field"><span>' + esc(t('c.theme')) + '</span><div class="seg seg-full" role="group" aria-label="' + esc(t('c.theme')) + '">' + ['light', 'dark', 'system'].map((k) => '<button type="button" data-a="theme" data-v="' + k + '" aria-pressed="' + (S.profile.theme === k) + '">' + esc(t('c.' + k)) + '</button>').join('') + '</div></div></section>' +
       '<section class="card stack-14"><h2 class="cap small muted">' + esc(t('prof.budget')) + '</h2><label class="field"><span>' + esc(t('prof.income')) + '</span><input id="p-income" inputmode="numeric" data-ch="income" value="' + esc(String(S.profile.income || '').replace(/\B(?=(\d{3})+(?!\d))/g, ' ')) + '"></label><label class="field"><span>' + esc(t('prof.payday')) + '</span><select id="p-payday" data-ch="payday">' + Array.from({ length: 28 }, (_, i) => '<option value="' + (i + 1) + '" ' + (S.profile.payday === i + 1 ? 'selected' : '') + '>' + (i + 1) + '</option>').join('') + '</select></label></section>' +
+      (SERVER() && S.sync ? syncCard() : '') +
       '<section class="card stack-14"><h2 class="cap small muted">' + esc(t('prof.notif')) + '</h2><div class="row-between"><span id="sw-pay">' + esc(t('prof.nPay')) + '</span>' + sw('pay') + '</div><div class="row-between"><span id="sw-tips">' + esc(t('prof.nTips')) + '</span>' + sw('tips') + '</div><p class="small muted">' + esc(t('prof.notifNote')) + '</p></section>' +
       '<section class="card stack-10"><h2 class="cap small muted">' + esc(t('prof.data')) + '</h2><a class="li li-link" href="#ops"><span class="grow">' + esc(t('st.allOps')) + '</span>' + icon('chev', 16) + '</a><a class="li li-link" href="#statements"><span class="grow">' + esc(t('st.hist')) + '</span>' + icon('chev', 16) + '</a>' +
       '<details><summary class="li li-link">' + esc(t('prof.rules')) + ' · ' + rules.length + '</summary>' + (rules.length ? '<ul class="list">' + rules.map((k) => '<li class="li"><span class="grow">' + esc(k) + ' → ' + esc(t('cat.' + S.rules[k])) + '</span><button type="button" class="icon-btn icon-btn-sm" data-a="ruleDel" data-v="' + esc(k) + '" aria-label="' + esc(t('prof.ruleDel')) + '">' + icon('trash', 16) + '</button></li>').join('') + '</ul>' : '<p class="small muted">' + esc(t('prof.rulesNone')) + '</p>') + '</details>' +
       '<button type="button" class="li li-link" data-a="clearChat"><span class="grow">' + esc(t('prof.clearChat')) + '</span></button></section>' +
       '<button type="button" class="btn btn-lg btn-danger-t" data-a="logout">' + esc(t('prof.logout')) + '</button><a class="link center" href="#delete">' + esc(t('prof.delAcc')) + '</a><p class="small muted center">' + esc(t('prof.version')) + '</p>';
+  }
+  function syncCard() {
+    const sy = S.sync;
+    const hhmm = (ms) => { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+    const lines = [];
+    if (navigator.onLine === false) lines.push(t('prof.syncOffline'));
+    else if (sy.error) lines.push(t('prof.syncErr'));
+    lines.push(sy.lastAt ? t('prof.syncOk', hhmm(sy.lastAt)) : t('prof.syncNever'));
+    if (sy.outbox.length) lines.push(t('prof.syncPending', sy.outbox.length));
+    return '<section class="card stack-10" aria-labelledby="sync-h"><h2 id="sync-h" class="cap small muted">' + esc(t('prof.sync')) + '</h2><p class="small" id="sync-status" role="status">' + lines.map(esc).join('<br>') + '</p><button type="button" class="btn btn-sm" data-a="syncNow">' + esc(t('prof.syncNow')) + '</button></section>';
   }
   function viewDelete() {
     const w = t('del.word');
@@ -691,6 +753,7 @@
     return [t('goal.celebT'), '<div class="celebrate"><div class="jar jar-xl" aria-hidden="true"><i style="height:100%"></i></div><p class="h3 center">' + esc(t('goal.celebS', g.name, M(g.saved))) + '</p><button type="button" class="btn btn-primary btn-lg" data-a="goalNew">' + esc(t('goal.celebNew')) + '</button></div>'];
   }
   function sheetForgot() {
+    if (SERVER()) return [t('auth.forgotTitle'), '<p>' + esc(t('auth.forgotServer')) + '</p>'];
     return [t('auth.forgotTitle'), '<p>' + esc(t('auth.forgotText')) + '</p><button type="button" class="btn btn-danger" data-a="resetAll">' + esc(t('auth.forgotReset')) + '</button>'];
   }
   function sheetConfirm() {
@@ -800,7 +863,24 @@
     },
     notif(el) { S.profile.notif[el.dataset.v] = !S.profile.notif[el.dataset.v]; commit(); },
     ruleDel(el) { const before = snapshot(); delete S.rules[el.dataset.v]; NZ.save(S); render(); toast(t('catS.changed'), restore(before)); },
-    logout() { S.session = false; ui.authMode = 'in'; commit(); },
+    async logout(el) {
+      if (!SERVER() || !S.account || !S.account.server) { S.session = false; ui.authMode = 'in'; commit(); return; }
+      if (S.sync && S.sync.outbox.length && !(el && el.dataset && el.dataset.force)) {
+        await NZ.sync.run();
+        if (S.sync.outbox.length) {
+          openSheet('confirm', { title: t('prof.logout'), text: t('prof.logoutPending', S.sync.outbox.length), yes: t('prof.logoutAnyway'), fn: () => A.logout({ dataset: { force: '1' } }) });
+          return;
+        }
+      }
+      const login = S.account.login;
+      await NZ.api.logout();
+      const keep = { lang: S.profile.lang, theme: S.profile.theme };
+      S = NZ.defaultState(); S.profile.lang = keep.lang; S.profile.theme = keep.theme;
+      NZ.syncResetBase(S);
+      ui.authMode = 'in'; ui.authLogin = login; ui.authErr = {}; ui.sheet = null;
+      commit();
+    },
+    syncNow() { NZ.sync.run().then(() => render()); },
     recapPrev() { ui.recapIdx = Math.max(0, ui.recapIdx - 1); render(); },
     recapNext() { ui.recapIdx = Math.min(4, ui.recapIdx + 1); render(); },
     recapShare() {
@@ -833,6 +913,11 @@
     if (k === 'chat') { const q = f.q.value; f.q.value = ''; return ask(q); }
     if (k === 'delete') {
       if (document.getElementById('del-w').value.trim().toUpperCase() !== t('del.word')) return;
+      if (SERVER() && S.account && S.account.server) {
+        try { await NZ.api.deleteAccount(); } catch (err) {
+          if (err.code !== 'session_expired') { toast(err.code === 'offline' ? t('del.offline') : t('auth.errServer')); return; }
+        }
+      }
       NZ.wipe(); S = NZ.defaultState(); ui.authMode = 'up'; ui.authErr = {}; location.hash = ''; ui.route = 'home'; render(); toast(t('del.done')); return;
     }
     if (k === 'env') {
@@ -910,7 +995,11 @@
   // pdf.js: воркер подключён обычным скриптом (window.pdfjsWorker), поэтому pdf.js работает в основном потоке —
   // так надёжно и в Android WebView по file://, и в браузере.
 
-  NZ.app = { get state() { return S; }, render, ui, A };
+  NZ.app = {
+    get state() { return S; }, render, ui, A,
+    onSessionExpired() { ui.authMode = 'in'; ui.authLogin = S.account ? S.account.login : ''; ui.authErr = { form: t('auth.expired') }; render(); }
+  };
+  if (SERVER() && S.session && S.sync) setTimeout(() => NZ.sync.run(), 300);
   readRoute();
   render();
 })();

@@ -87,7 +87,8 @@
       chat: [],
       draft: null,
       dismissed: {},
-      demo: false
+      demo: false,
+      sync: null // { cursor, outbox, lastAt, error, clock } — только при входе через сервер
     };
   };
   NZ.load = function () {
@@ -99,7 +100,10 @@
       return Object.assign(d, s, { profile: Object.assign(d.profile, s.profile || {}), auth: Object.assign(d.auth, s.auth || {}) });
     } catch (e) { return NZ.defaultState(); }
   };
-  NZ.save = function (s) { try { localStorage.setItem(KEY, JSON.stringify(s)); return true; } catch (e) { return false; } };
+  NZ.save = function (s) {
+    if (NZ.syncTrack) NZ.syncTrack(s); // изменения → очередь синхронизации (sync.js)
+    try { localStorage.setItem(KEY, JSON.stringify(s)); return true; } catch (e) { return false; }
+  };
   NZ.wipe = function () { try { localStorage.removeItem(KEY); } catch (e) { /* хранилище недоступно */ } };
   NZ.uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 

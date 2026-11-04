@@ -3,3 +3,6 @@ android/build/
 android/*.p12
 dist/artifact.html
 node_modules/
+server/node_modules/
+server/data/
+.env

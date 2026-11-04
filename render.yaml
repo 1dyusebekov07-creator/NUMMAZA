@@ -1,0 +1,24 @@
+# Render Blueprint: сервер NUMMAZA + база PostgreSQL.
+# Render → New → Blueprint → выберите репозиторий с этим файлом.
+services:
+  - type: web
+    name: nummaza
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: cd server && npm ci --omit=dev
+    startCommand: cd server && node index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nummaza-db
+          property: connectionString
+      - key: ALLOWED_ORIGINS
+        sync: false   # при необходимости: другие сайты через запятую
+databases:
+  - name: nummaza-db
+    plan: free
+    region: frankfurt

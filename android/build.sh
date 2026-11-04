@@ -28,6 +28,15 @@ rm -rf "$B" && mkdir -p "$B/classes" "$B/stubs" "$B/assets/www"
 
 echo "1/6 Веб-приложение → assets/www"
 cp -r "$ROOT/../app/." "$B/assets/www/"
+# Адрес сервера: NUMMAZA_API_URL=https://nummaza.onrender.com android/build.sh (пусто — приложение работает без сервера)
+API_URL=${NUMMAZA_API_URL:-}
+if [ -n "$API_URL" ]; then
+  case "$API_URL" in https://*) ;; *) echo "NUMMAZA_API_URL должен начинаться с https:// (Android не пускает http)"; exit 1;; esac
+  printf "window.NZ = window.NZ || {};\nNZ.API_URL = '%s';\n" "${API_URL%/}" > "$B/assets/www/js/config.js"
+  echo "   сервер: $API_URL"
+else
+  echo "   сервер не задан — локальный режим (задайте NUMMAZA_API_URL)"
+fi
 
 echo "2/6 Ресурсы (aapt2 compile + link)"
 "$T/aapt2" compile --dir "$ROOT/res" -o "$B/res.zip"
