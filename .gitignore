@@ -1,0 +1,5 @@
+android/tools/
+android/build/
+android/*.p12
+dist/artifact.html
+node_modules/
