@@ -59,6 +59,7 @@
   const themeBtn = () => '<button type="button" class="icon-btn" data-a="themeToggle" aria-label="' + esc(isDark() ? t('c.toLight') : t('c.toDark')) + '">' + icon(isDark() ? 'sun' : 'moon') + '</button>';
 
   /* ---------- Сохранение, тост с отменой ---------- */
+  let shared = null; // файл из «Поделиться» (см. pullShared)
   function commit() { NZ.save(S); render(); }
   let toastTimer = null;
   function toast(msg, undoFn) {
@@ -102,6 +103,7 @@
     app.innerHTML = (navigator.onLine === false ? '<div class="offline" role="status">' + icon('wifi', 16) + esc(t('c.offline')) + '</div>' : '') + html;
     renderSheet();
     renderToast();
+    if (shared && S.account && S.session && !ui.importing) setTimeout(useShared, 0);
     if (ui.route === 'numa') { const log = document.getElementById('chatlog'); if (log) log.scrollTop = log.scrollHeight; }
   }
 
@@ -123,6 +125,7 @@
     return '<div class="solo"><div class="solo-in">' +
       '<div class="row-between"><div class="brand-row">' + logo(32) + '<b>nummaza</b></div><div class="row-gap">' + langSwitch() + themeBtn() + '</div></div>' +
       '<div class="stack-6 mt-16"><h1 class="h1">' + esc(mode === 'in' ? t('auth.titleIn') : t('auth.titleUp')) + '</h1><p class="muted">' + esc(t('auth.tagline')) + '</p></div>' +
+      (shared ? '<p class="note" id="shared-note">' + icon('file', 18) + '<span>' + esc(t('st.shared', shared.name)) + '</span></p>' : '') +
       '<div class="seg seg-full" role="group" aria-label="' + esc(t('auth.mode')) + '"><button type="button" data-a="authMode" data-v="in" aria-pressed="' + (mode === 'in') + '">' + esc(t('auth.signIn')) + '</button><button type="button" data-a="authMode" data-v="up" aria-pressed="' + (mode === 'up') + '">' + esc(t('auth.signUp')) + '</button></div>' +
       '<form class="stack-14" data-form="auth" novalidate>' +
       (mode === 'up' ? '<label class="field"><span>' + esc(t('auth.name')) + '</span><input id="a-name" name="name" autocomplete="given-name" placeholder="' + esc(t('auth.namePh')) + '" value="' + esc(ui.authName || '') + '" aria-invalid="' + !!e.name + '">' + err('name') + '</label>' : '') +
@@ -475,6 +478,32 @@
       finishImport(parsed, name);
       await tick(4);
     } catch (e) { console.error(e); ui.importing = null; ui.importErr = t('st.errRead'); render(); }
+  }
+  // Файл, которым поделились из другого приложения (Kaspi → «Поделиться» → NUMMAZA).
+  // Android-часть кладёт его в мост NummazaNative; если пользователь ещё не вошёл — ждём входа.
+  function pullShared() {
+    const N = window.NummazaNative;
+    if (!N || typeof N.takeSharedFile !== 'function') return;
+    let j = null;
+    try { j = JSON.parse(N.takeSharedFile() || 'null'); } catch (e) { j = null; }
+    if (!j) return;
+    if (j.error || !j.data) {
+      ui.importErr = t(j.error === 'size' ? 'st.errSize' : 'st.errRead');
+      if (S.account && S.session && S.profile.onboarded) go('statements'); else render();
+      return;
+    }
+    const bin = atob(j.data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    shared = new File([bytes], j.name || 'statement.pdf', { type: j.type || '' });
+    if (S.account && S.session) useShared(); else render();
+  }
+  function useShared() {
+    if (!shared || !S.account || !S.session || ui.importing) return;
+    const f = shared; shared = null;
+    ui.sheet = null;
+    if (S.profile.onboarded) go('statements');
+    handleFile(f);
   }
   function finishImport(parsed, name, demo) {
     ui.importing = null;
@@ -996,10 +1025,11 @@
   // так надёжно и в Android WebView по file://, и в браузере.
 
   NZ.app = {
-    get state() { return S; }, render, ui, A,
+    get state() { return S; }, render, ui, A, pullShared,
     onSessionExpired() { ui.authMode = 'in'; ui.authLogin = S.account ? S.account.login : ''; ui.authErr = { form: t('auth.expired') }; render(); }
   };
   if (SERVER() && S.session && S.sync) setTimeout(() => NZ.sync.run(), 300);
   readRoute();
   render();
+  pullShared();
 })();

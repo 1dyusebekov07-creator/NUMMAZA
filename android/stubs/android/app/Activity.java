@@ -1,4 +1,5 @@
 package android.app;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -9,6 +10,10 @@ public class Activity extends Context {
     protected void onCreate(Bundle savedInstanceState) { throw new RuntimeException("stub"); }
     protected void onActivityResult(int requestCode, int resultCode, Intent data) { throw new RuntimeException("stub"); }
     protected void onSaveInstanceState(Bundle outState) { throw new RuntimeException("stub"); }
+    protected void onNewIntent(Intent intent) { throw new RuntimeException("stub"); }
+    public Intent getIntent() { throw new RuntimeException("stub"); }
+    public void setIntent(Intent newIntent) { throw new RuntimeException("stub"); }
+    public ContentResolver getContentResolver() { throw new RuntimeException("stub"); }
     public void onBackPressed() { throw new RuntimeException("stub"); }
     public void setContentView(View view) { throw new RuntimeException("stub"); }
     public void startActivity(Intent intent) { throw new RuntimeException("stub"); }

@@ -10,6 +10,7 @@ public class WebView extends View {
     public void setWebChromeClient(WebChromeClient client) { throw new RuntimeException("stub"); }
     public void addJavascriptInterface(Object object, String name) { throw new RuntimeException("stub"); }
     public void loadUrl(String url) { throw new RuntimeException("stub"); }
+    public void evaluateJavascript(String script, ValueCallback<String> resultCallback) { throw new RuntimeException("stub"); }
     public boolean canGoBack() { throw new RuntimeException("stub"); }
     public void goBack() { throw new RuntimeException("stub"); }
     public WebBackForwardList saveState(Bundle outState) { throw new RuntimeException("stub"); }
